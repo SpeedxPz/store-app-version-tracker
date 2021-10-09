@@ -1,5 +1,4 @@
 import koaRouter = require('koa-router')
-import mongoose from 'mongoose';
 import { LibrdKafkaError, Metadata } from 'node-rdkafka';
 import { scheduleConsumer, versionEventProducer } from '../../../../lib/kafka';
 
@@ -26,9 +25,9 @@ const getVersionEventMetadata = async(): Promise<boolean> => {
 
 router.get('/_health', async(_1: koaRouter.IRouterContext) => {
 
-  if (mongoose.connection.readyState === 0) {
+  /*if (mongoose.connection.readyState === 0) {
     throw Error('Error')
-  }
+  }*/
 
   await getScheduleMetadata();
   await getVersionEventMetadata();
