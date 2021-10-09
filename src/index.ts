@@ -7,25 +7,21 @@ import { scheduleConsumer, schedulePollMessage, versionEventProducer, versionEve
 import { GetAppStoreInfo, GetPlayStoreInfo } from './lib/scraper';
 import { AppInfoSchema, IAppInfo, IAppInfoMongo } from './model/AppInfo';
 import { sleep } from './utils/common';
-import { writeLog } from './utils/logger';
+import { LogLevel, writeLog } from './utils/logger';
 
 
 dotenv.config();
 
 
 const start = async () => {
-  writeLog(`Starting up as namespace: ${config.app.namespace}`);
+  writeLog(LogLevel.INFO, 'startup', `${config.app.namespace}`);
   config.checkRequiredConfig();
   try {
     await scheduleConsumer.connect();
     await versionEventProducer.connect();
-    await mongoose.connect(config.app.mongo.uri, {
-      useNewUrlParser: true,
-      useUnifiedTopology:true,
-      useCreateIndex: true,
-    });
+    await mongoose.connect(config.app.mongo.uri);
   } catch(error) {
-    writeLog(`[ERROR] Error occured while connect to store | Reason: ${error}`);
+    writeLog(LogLevel.ERROR, 'startup_error', `${error}`);
     await scheduleConsumer.disconnect();
     process.exit(1);
   }
@@ -48,20 +44,24 @@ const messageExecutor = async () => {
         scheduleConsumer.commit();
       }
     } catch (error) {
-      writeLog(`[WARN] Message executor error occured | reason: ${error}`);
-      await sleep(1000);
+      writeLog(LogLevel.ERROR, 'consume_error', `${error}`);
+      process.exit(1);
     }
   }
 };
 
 const checkForUpdate = async () : Promise<any> => {
   return new Promise(async (resolve: Function , _1: Function) => {
-    writeLog(`Start checking app update...`);
+    writeLog(LogLevel.INFO, 'update_call', `Start checking app version...`);
     const androidApps: string[] = config.app.apps.playstore.split(",");
     const iosApps: string[] = config.app.apps.appstore.split(",");
 
-    writeLog(`Android apps: ${androidApps.length} | iOS apps: ${iosApps.length}`);
-    writeLog(`Retriving information from store...`);
+    writeLog(LogLevel.INFO, 'update_app_total', {
+      apps: {
+        android: androidApps.length,
+        ios: iosApps.length,
+      }
+    });
 
 
     const androidAppInfos: IAppInfo[] = [];
@@ -73,7 +73,7 @@ const checkForUpdate = async () : Promise<any> => {
         androidAppInfos.push(appInfo);
         await sleep(1000);
       } catch (error) {
-        writeLog(`[ERROR] Error occured while get info from PlayStore | Reason: ${error}`);
+        writeLog(LogLevel.ERROR, 'update_playstore_error',  `${error}`);
       }
     }
 
@@ -83,11 +83,11 @@ const checkForUpdate = async () : Promise<any> => {
         iosAppInfos.push(appInfo);
         await sleep(1000);
       } catch (error) {
-        writeLog(`[ERROR] Error occured while get info from AppStore | Reason: ${error}`);
+        writeLog(LogLevel.ERROR, 'update_appstore_error',  `${error}`);
       }
     }
 
-    writeLog(`Store retrival complated`);
+    writeLog(LogLevel.INFO, 'update_call', `Check update success`);
 
 
     const AppInfoAndroidModel: mongoose.Model<IAppInfoMongo> = mongoose.model<IAppInfoMongo>('android', AppInfoSchema);
@@ -101,7 +101,15 @@ const checkForUpdate = async () : Promise<any> => {
         if(dbAppInfos.length) {
           const dbAppInfo: IAppInfoMongo = dbAppInfos[0];
           if(dbAppInfo.version != appInfo.version) {
-            writeLog(`Found new version of ${appInfo.id} | ${appInfo.name} | version: ${appInfo.version}`);
+            writeLog(LogLevel.INFO, 'update_new_version', {
+              app_info: {
+                platform: 'android',
+                id: appInfo.id,
+                name: appInfo.name,
+                version_from: dbAppInfo.version,
+                version_to: appInfo.version,
+              }
+            });
             notifyApp.push(appInfo);
             dbAppInfo.version = appInfo.version;
             dbAppInfo.image = appInfo.image;
@@ -112,7 +120,14 @@ const checkForUpdate = async () : Promise<any> => {
           notifyApp.push(appInfo);
         }
       } catch (error) {
-        writeLog(`[ERROR] Error while updating ${appInfo.id} | Reason: ${error}`);
+        writeLog(LogLevel.ERROR, 'update_error',  {
+          platform: 'android',
+          app_info: {
+            id: appInfo.id,
+            name: appInfo.name,
+          },
+          error: error
+        });
       }
     }
 
@@ -122,22 +137,36 @@ const checkForUpdate = async () : Promise<any> => {
         if(dbAppInfos.length) {
           const dbAppInfo: IAppInfoMongo = dbAppInfos[0];
           if(dbAppInfo.version != appInfo.version) {
-            writeLog(`Found new version of ${appInfo.id} | ${appInfo.name} | version: ${appInfo.version}`);
+            writeLog(LogLevel.INFO, 'update_new_version', {
+              platform: 'ios',
+              app_info: {
+                id: appInfo.id,
+                name: appInfo.name,
+                version_from: dbAppInfo.version,
+                version_to: appInfo.version,
+              }
+            });
             notifyApp.push(appInfo);
             dbAppInfo.version = appInfo.version;
             dbAppInfo.image = appInfo.image;
             dbAppInfo.save();
           }
         } else {
-          writeLog(`Found new version of ${appInfo.id} | ${appInfo.name} | version: ${appInfo.version}`);
           AppInfoiOSModel.create(appInfo);
           notifyApp.push(appInfo);
         }
       } catch (error) {
-        writeLog(`[ERROR] Error while updating ${appInfo.id} | Reason: ${error}`);
+        writeLog(LogLevel.ERROR, 'update_error',  {
+          platform: 'ios',
+          app_info: {
+            id: appInfo.id,
+            name: appInfo.name,
+          },
+          error: error
+        });
       }
     }
-    writeLog(`${notifyApp.length} apps to notify`);
+    writeLog(LogLevel.INFO, 'update_call', `${notifyApp.length} apps to notify`);
     for(const app of notifyApp) {
       versionEventSendMessage(
         `version-notify-${app.id}`,
